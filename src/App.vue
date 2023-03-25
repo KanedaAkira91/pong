@@ -4,6 +4,11 @@
         <router-view/> -->
         <div class="wrapper">
             <div class="pong-container">
+              <div v-if="gameIsRunning" class="score">
+                <span>{{this.gameScore.ScoreP1}}</span>
+                <span>SCORE</span>
+                <span>{{this.gameScore.ScoreP2}}</span>
+              </div>
                 <canvas ref="pongcanvas"
                         class="pong-canvas"></canvas>
 
@@ -214,7 +219,21 @@
                         this.isValueBetween(this.player2.paddle.position.y, this.player2.paddle.positionLeftBottom().y, this.ball.positionRightBottom().y)
                     );
             },
-
+            hasPlayerScored() {
+              if(this.ball.ballPosition.x < this.player1.paddle.position.x){
+                this.gameScore.ScoreP2 += 1;
+                this.resetBall();
+              }
+              if(this.ball.ballPosition.x > this.player2.paddle.position.x) {
+                this.gameScore.ScoreP1 += 1;
+                this.resetBall();
+              }
+            },
+            hasPlayerWon() {
+              if(this.gameScore.ScoreP1 > 9 || this.gameScore.ScoreP2 > 9){
+                this.gameIsRunning = !this.gameIsRunning
+              }
+            },
             calculateBallMovement() {
                 if (this.hasCollidedWithTopOrBottom()) {
                     this.ball.ballDirection.y *= -1;
@@ -325,6 +344,8 @@
 
                     this.calculatePaddleMovement();
                     this.calculateBallMovement();
+                    this.hasPlayerScored();
+                    this.hasPlayerWon();
 
                     // draw game components
                     this.drawBall();
@@ -361,7 +382,11 @@
                     y: 0,
                 },
                 gameIsRunning: false,
-                pushedKeys: []
+                pushedKeys: [],
+                gameScore: {
+                  ScoreP1: 0,
+                  ScoreP2: 0
+                }
             }
         },
         computed: {
@@ -404,6 +429,16 @@
 
     .pong-canvas {
         background-color: black;
+    }
+
+    .score {
+      position: absolute;
+      top:30%;
+      color: white;
+      display:flex;
+      justify-content: space-evenly;
+      align-items: center;
+      width: 200px;
     }
 
     .menu {
