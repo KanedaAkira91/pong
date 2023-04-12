@@ -1,20 +1,9 @@
 <template>
     <div class="app-wrapper">
-        <!-- <header-vue></header-vue>
-        <router-view/> -->
         <div class="wrapper">
-            <div class="pong-container">
-              <div v-if="gameIsRunning" class="score">
-                <span>{{this.gameScore.ScoreP1}}</span>
-                <span>SCORE</span>
-                <span>{{this.gameScore.ScoreP2}}</span>
-              </div>
-                <canvas ref="pongcanvas"
-                        class="pong-canvas"></canvas>
-
-                <div v-if="!gameIsRunning" class="menu">
-                    <span v-on:click="selectDifficulty(menuItem)" v-for="menuItem in menuItems" :key="menuItem.id">{{menuItem.label}}</span>
-                </div>
+            <div class="missileCommand-container">
+                <canvas ref="missileCommandCanvas"
+                        class="missileCommand-canvas"></canvas>
             </div>
         </div>
 
@@ -23,23 +12,12 @@
 
 <script>
 
-
-
-    // import HeaderVue from "./components/header-vue";
-
-    const INIT_BALL_SPEED = 0.25;
-    const FAST_BALL_SPEED = 0.85;
-    const SLOW_BALL_SPEED = 0.45;
-    const MEDIUM_BALL_SPEED = 0.70;
-
-
-
     const FRAME_RATE = 60;
     const MS_PER_FRAME = 1000 / FRAME_RATE;
-    const FRAME_PERCENTAGE_PER_SECOND = MS_PER_FRAME / 1000;
+    // const FRAME_PERCENTAGE_PER_SECOND = MS_PER_FRAME / 1000;
 
-    const PADDLE_MOVEMENT_PER_SECOND_IN_PERCENTAGE = 0.5;
-
+    const MISSILE_FIRE_KEYS = ['a', 's', 'd'];
+    const EXPLOSION_RADIUS_MAX = 0.035;
 
     class Vector2D {
         x;
@@ -49,351 +27,394 @@
             this.x = x;
             this.y = y;
         }
-    }
 
-    class MenuItem {
-        label;
-        ballSpeed;
-        id;
+        length() {
+            return Math.sqrt(Math.pow(this.x, 2) + Math.pow(this.y, 2));
+        }
 
-        constructor(label,id, ballSpeed) {
-            this.id = id;
-            this.label = label;
-            this.ballSpeed = ballSpeed;
+        clone() {
+            return Vector2D.from(this);
+        }
+
+        add(vector2D) {
+            this.x += vector2D.x;
+            this.y += vector2D.y;
+        }
+
+        multiply(value) {
+            this.x *= value;
+            this.y *= value;
+        }
+
+        equals(vector2D) {
+            return this.x === vector2D.x && this.y === vector2D.y;
+        }
+
+        static from(vector2D) {
+            return new Vector2D(vector2D.x, vector2D.y);
         }
     }
 
-    class Paddle {
-        position;
-        height;
+
+    class Town {
+        x;
+        y;
         width;
+        height;
+        centerTopPoint;
+        destroyed;
 
-        constructor(position, height, width) {
-            this.position = position;
-            this.height = height;
+
+        constructor(x, y, width, height, missileCommandCanvas) {
+            this.x = x;
+            this.y = y;
             this.width = width;
-        }
-
-        positionLeftBottom() {
-            return new Vector2D(this.position.x, this.position.y + this.height);
-        }
-
-        positionRightTop() {
-            return new Vector2D(this.position.x + this.width, this.position.y);
-        }
-
-        positionRightBottom() {
-            return new Vector2D(this.position.x + this.width, this.position.y + this.height);
-        }
-
-        centerPoint() {
-            return new Vector2D(this.position.x + (this.width / 2), this.position.y + (this.height / 2));
+            this.height = height;
+            this.centerTopPoint = new Vector2D(this.x + ((missileCommandCanvas.width * this.width) / 2), this.y);
         }
     }
 
-    class Ball {
-        ballDirection;
-        ballPosition;
-        ballSize;
-        speed;
+    class TargetCross {
+        leftPoint;
+        rightPoint;
+        bottomPoint;
+        topPoint;
 
-        constructor(ballPosition, ballSize, ballDirection, speed) {
-            this.ballPosition = ballPosition;
-            this.ballSize = ballSize;
-            this.ballDirection = ballDirection;
-            this.speed = speed
-        }
-
-        positionLeftBottom() {
-            return new Vector2D(this.ballPosition.x, this.ballPosition.y + this.ballSize);
-        }
-
-        positionRightTop() {
-            return new Vector2D(this.ballPosition.x + this.ballSize, this.ballPosition.y);
-        }
-
-        positionRightBottom() {
-            return new Vector2D(this.ballPosition.x + this.ballSize, this.ballPosition.y + this.ballSize);
-        }
-
-        centerPoint() {
-            return new Vector2D(this.ballPosition.x + (this.ballSize / 2), this.ballPosition.y + (this.ballSize / 2));
+        constructor(centerPoint, crossLength) {
+            this.leftPoint = new Vector2D(centerPoint.x - crossLength, centerPoint.y);
+            this.rightPoint = new Vector2D(centerPoint.x + crossLength, centerPoint.y);
+            this.bottomPoint = new Vector2D(centerPoint.x, centerPoint.y + crossLength);
+            this.topPoint = new Vector2D(centerPoint.x, centerPoint.y - crossLength);
         }
     }
+
+    class Missile {
+        id;
+        startingPoint;
+        currentPoint;
+        targetPoint;
+        direction;
+        readyToExplode = false;
+        explosionRadius = 0;
+
+        constructor(id, targetPoint) {
+            this.id = id;
+            this.targetPoint = targetPoint;
+        }
+    }
+
+    class InterceptorMissile extends Missile {
+        targetCross;
+
+        constructor(id, targetPoint, targetCross) {
+            super(id, targetPoint);
+            this.targetCross = targetCross;
+        }
+    }
+
+
+    class EnemyMissile extends Missile {
+
+        constructor(id, startingPoint, targetPoint, direction) {
+            super(id, targetPoint);
+            this.startingPoint = startingPoint;
+            this.direction = direction;
+        }
+    }
+
+    /*class InterceptorMissile extends Missile {
+    }
+
+    class EnemyMissile extends Missile {
+
+    }*/
+
+    class Base extends Town {
+        missileKey;
+
+
+        constructor(x, y, width, height, missileKey, missileCommandCanvas) {
+            super(x, y, width, height, missileCommandCanvas);
+            this.missileKey = missileKey;
+        }
+    }
+
+    const TOWN_WIDTH = 0.08;
+    const TOWN_HEIGHT = 0.02;
+
+    const BASE_WIDTH = 0.113;
+    const GAP = 0.01;
+    const BASE_HEIGHT = 0.04;
+
+    const GROUND_POSITION_Y = 0.95;
+
 
     export default {
         name: 'App',
-        components: {
-            // HeaderVue,
-        },
+        components: {},
         created() {
-            window.addEventListener('keydown', this.onKeyDown);
+            /*window.addEventListener('keydown', this.onKeyDown);
             window.addEventListener('keyup', this.onKeyUp);
+            window.addEventListener("mousemove", this.onMouseMove);*/
         },
         mounted() {
-            this.pongCanvas = this.$refs.pongcanvas;
-            this.drawingContext2D = this.pongCanvas.getContext("2d");
+            this.missileCommandCanvas = this.$refs.missileCommandCanvas;
+            this.missileCommandCanvas.onclick = this.onMissileTargetClicked;
+            window.onkeyup = this.onMissileFired;
+            this.drawingContext2D = this.missileCommandCanvas.getContext("2d");
             this.drawingContext2D.scale(1, 1);
-            this.pongCanvas.width = 750;
-            this.pongCanvas.height = 500;
 
-            this.paddleDimension.width = 15;
-            this.paddleDimension.height = this.pongCanvas.height * 0.18;
-
-            this.player1 = {
-                paddle: new Paddle({
-                    x: this.paddleDimension.width,
-                    y: (this.pongCanvas.height / 2) - (this.paddleDimension.height / 2)
-                }, this.paddleDimension.height, this.paddleDimension.width),
-                score: 0,
-                direction: 0,
-            };
-
-            this.player2 = {
-                paddle: new Paddle({
-                    x: this.pongCanvas.width - (2 * this.paddleDimension.width),
-                    y: (this.pongCanvas.height / 2) - (this.paddleDimension.height / 2)
-                }, this.paddleDimension.height, this.paddleDimension.width),
-                score: 0,
-                direction: 0,
-            };
-
-            this.resetBall();
+            this.calculateCanvasDimensions();
+            this.generateTowns();
+            this.generateBase();
+            this.generateRandomEnemyMissiles();
             this.gameLoop();
-
         },
+        //todo mouseevent für die Position auf dem Canvas , x zeichnen. √
+        //todo jeder basis eine taste zuweisen. √
+        //todo rakete abfeuern => linie zeichnen von basis bis einschlagspunkt √
+        //todo am einschlagspunkt explosionsradius erzeugen ( kreis )
         methods: {
-            resetBall() {
-                const ballPosition = {
-                    x: (this.pongCanvas.width / 2) - (this.ballSize / 2),
-                    y: (this.pongCanvas.height / 2) - (this.ballSize / 2)
-                };
-
-                this.ball = new Ball(ballPosition, this.ballSize, this.calculateInitialBallDirection(), INIT_BALL_SPEED);
+            drawTargetCross(targetCross) {
+                this.drawLine(targetCross.leftPoint.x, targetCross.leftPoint.y, targetCross.rightPoint.x, targetCross.rightPoint.y);
+                this.drawLine(targetCross.topPoint.x, targetCross.topPoint.y, targetCross.bottomPoint.x, targetCross.bottomPoint.y);
             },
-            onKeyDown(event) {
-                const pushedKey = event.key;
-                if (!this.gameIsRunning) {
+            generateRandomEnemyMissiles() {
+                for (let i = 1; i < 10; i++) {
+                    this.generatedEnemyMissiles.push(this.generateRandomEnemyMissile(i));
+                }
+            },
+            generateRandomEnemyMissile(id) {
+                const targetPoint = this.getRandomTownOrBase().centerTopPoint.clone();
+                const startingPoint = new Vector2D(this.missileCommandCanvas.width * Math.random(), 0);
+                return new EnemyMissile(id, startingPoint, targetPoint, this.calculateDirectionVector(startingPoint, targetPoint));
+            },
+            selectRandomTownForAttack() {
+                const aliveTowns = this.towns.filter(town => !town.destroyed);
+                return aliveTowns[this.getRandomIndex(aliveTowns.length)];
+            },
+
+            selectRandomBaseForAttack() {
+                const aliveBases = this.bases.filter(base => !base.destroyed);
+                return aliveBases[this.getRandomIndex(aliveBases.length)];
+            },
+            getRandomIndex(max) {
+                return Math.floor(Math.random() * max)
+            },
+            getRandomTownOrBase() {
+
+                // entscheide zuerst ob stadt oder basis, wenn eins von beiden nicht mehr geht dann das andere
+                // wenn stadt dann nur städte die nicht zerstört sind
+                // wenn basis dann nur basen die nicht zerstört sind
+                if (this.bases.length === 0) {
+                    return this.selectRandomTownForAttack()
+                }
+
+                if (this.towns.length === 0) {
+                    return this.selectRandomBaseForAttack()
+                }
+
+                if ((this.isBaseSelected())) {
+                    return this.selectRandomBaseForAttack();
+                }
+                return this.selectRandomTownForAttack();
+            },
+            isBaseSelected() {
+                return (Math.random() < 0.4);
+            },
+            onMissileFired(keyboardEvent) {
+                const pushedKey = keyboardEvent.key.toLowerCase();
+                if (!MISSILE_FIRE_KEYS.includes(pushedKey)) {
                     return;
                 }
-                if (this.pushedKeys.includes(pushedKey)) {
+
+                this.handlePlayerMissileFire(pushedKey);
+            },
+            handlePlayerMissileFire(pushedKey) {
+                const responsibleBase = this.bases.find(base => base.missileKey === pushedKey);
+                const notFiredMissiles = this.playerMissiles.filter(missile => !missile.startingPoint);
+                if (notFiredMissiles.length === 0) {
                     return;
                 }
 
-                this.pushedKeys.push(pushedKey);
+                const selectedMissile = this.selectNextNotFiredMissile(notFiredMissiles);
+                this.prepareMissileForLaunch(selectedMissile, responsibleBase);
             },
-            onKeyUp(event) {
-
-                const releasedKey = event.key;
-
-                if (releasedKey === 'p') {
-                    this.gameIsRunning = !this.gameIsRunning;
-                    return;
-                }
-
-                if (releasedKey === 'r') {
-                    this.resetBall();
-                    return;
-                }
-
-
-                if (!this.gameIsRunning) {
-                    return;
-                }
-                this.pushedKeys = this.pushedKeys.filter((pushedKey) => pushedKey !== releasedKey);
-            },
-            hasCollidedWithTopOrBottom() {
-                return this.ball.ballPosition.y <= 0 || this.ball.ballPosition.y + this.ball.ballSize >= this.pongCanvas.height
-            },
-            hasPaddlePlayer1Collision() {
-                return this.isValueBetween(this.player1.paddle.position.x, this.player1.paddle.positionRightTop().x, this.ball.ballPosition.x) &&
-                    (
-                        this.isValueBetween(this.player1.paddle.position.y, this.player1.paddle.positionRightBottom().y, this.ball.ballPosition.y) ||
-                        this.isValueBetween(this.player1.paddle.position.y, this.player1.paddle.positionRightBottom().y, this.ball.positionLeftBottom().y)
-                    );
-            },
-            hasPaddlePlayer2Collision() {
-                return this.isValueBetween(this.player2.paddle.position.x, this.player2.paddle.positionRightTop().x, this.ball.positionRightTop().x) &&
-                    (
-                        this.isValueBetween(this.player2.paddle.position.y, this.player2.paddle.positionLeftBottom().y, this.ball.positionRightTop().y) ||
-                        this.isValueBetween(this.player2.paddle.position.y, this.player2.paddle.positionLeftBottom().y, this.ball.positionRightBottom().y)
-                    );
-            },
-            hasPlayerScored() {
-              if(this.ball.ballPosition.x < this.player1.paddle.position.x){
-                this.gameScore.ScoreP2 += 1;
-                this.resetBall();
-              }
-              if(this.ball.ballPosition.x > this.player2.paddle.position.x) {
-                this.gameScore.ScoreP1 += 1;
-                this.resetBall();
-              }
-            },
-            hasPlayerWon() {
-              if(this.gameScore.ScoreP1 > 9 || this.gameScore.ScoreP2 > 9){
-                this.gameIsRunning = !this.gameIsRunning
-              }
-            },
-            calculateBallMovement() {
-                if (this.hasCollidedWithTopOrBottom()) {
-                    this.ball.ballDirection.y *= -1;
-                }
-                // LinksOben{1,1}, RechtsOben {2,1}, LinksUnten {1, 5}, RechtsUnten {2,5}
-
-                //BallPos {3, 1}
-
-                if (this.hasPaddlePlayer1Collision()) {
-                    console.log("CollisionP1");
-                    this.calculateBallDirectionAfterCollision(this.player1.paddle);
-                }
-
-                if (this.hasPaddlePlayer2Collision()) {
-                    console.log("CollisionP2");
-                    this.calculateBallDirectionAfterCollision(this.player2.paddle, -1);
-                }
-
-                this.ball.ballPosition.x +=  (this.ball.ballDirection.x * (this.ball.speed * this.pongCanvas.width)) * FRAME_PERCENTAGE_PER_SECOND;
-                this.ball.ballPosition.y += (this.ball.ballDirection.y * (this.ball.speed * this.pongCanvas.width)) * FRAME_PERCENTAGE_PER_SECOND;
-                //todo
-            },
-            //1, 10, 5
-            isValueBetween(start, end, value) {
-                return value >= start && value <= end;
-            },
-            calculatePaddleMovement() {
-                if (this.gameIsRunning) {
-                    const paddleSpeedPerFrame = PADDLE_MOVEMENT_PER_SECOND_IN_PERCENTAGE * this.pongCanvas.height * FRAME_PERCENTAGE_PER_SECOND;
-                    if (this.pushedKeys.includes('w')) {
-                        this.player1.paddle.position.y = Math.max(0, this.player1.paddle.position.y - paddleSpeedPerFrame);
+            selectNextNotFiredMissile(notFiredMissiles) {
+                let selectedMissile = notFiredMissiles[0];
+                notFiredMissiles.forEach(notFiredMissile => {
+                    if (notFiredMissile.missileCounter < selectedMissile.missileCounter) {
+                        selectedMissile = notFiredMissile;
                     }
-                    if (this.pushedKeys.includes('s')) {
-                        this.player1.paddle.position.y = Math.min(500 - this.paddleDimension.height, this.player1.paddle.position.y + paddleSpeedPerFrame);
+                });
+                return selectedMissile;
+            },
+            prepareMissileForLaunch(selectedMissile, responsibleBase) {
+                selectedMissile.startingPoint = responsibleBase.centerTopPoint.clone();
+                selectedMissile.currentPoint = responsibleBase.centerTopPoint.clone();
+                selectedMissile.direction = this.calculateDirectionVector(selectedMissile.startingPoint, selectedMissile.targetPoint);
+            },
+            calculateDirectionVector(startingPoint, targetPoint) {
+                const rawDirectionVector = new Vector2D(targetPoint.x - startingPoint.x, targetPoint.y - startingPoint.y);
+                const vectorLength = Math.sqrt(Math.pow(rawDirectionVector.x, 2) + Math.pow(rawDirectionVector.y, 2));
+                return new Vector2D(rawDirectionVector.x / vectorLength, rawDirectionVector.y / vectorLength);
+            },
+            onMissileTargetClicked(mouseEvent) {
+                const targetPoint = new Vector2D(mouseEvent.offsetX, mouseEvent.offsetY);
+                const targetCross = new TargetCross(targetPoint, this.missileCommandCanvas.width * 0.003);
+                this.playerMissiles.push(new InterceptorMissile(this.missileCounter, targetPoint, targetCross));
+                this.missileCounter += 1;
+            },
+            calculatePlayerMissilesMovement() {
+                const firedMissiles = this.playerMissiles.filter(missile => missile.startingPoint && missile.targetPoint && missile.direction && !missile.readyToExplode);
+                firedMissiles.forEach(missile => {
+                    const distanceVector = new Vector2D(missile.targetPoint.x - missile.currentPoint.x, missile.targetPoint.y - missile.currentPoint.y);
+                    const distanceBetweenTPandCP = distanceVector.length();
+                    if (missile.targetPoint.equals(missile.currentPoint)) {
+                        missile.readyToExplode = true;
+                        return;
                     }
 
+                    if (distanceBetweenTPandCP > missile.direction.length()) {
+                        missile.currentPoint.add(missile.direction);
+                        return;
+                    }
 
-                    if (this.pushedKeys.includes('ArrowDown')) {
-                        this.player2.paddle.position.y = Math.min(500 - this.paddleDimension.height, this.player2.paddle.position.y + paddleSpeedPerFrame);
-                    }
-                    if (this.pushedKeys.includes('ArrowUp')) {
-                        this.player2.paddle.position.y = Math.max(0, this.player2.paddle.position.y - paddleSpeedPerFrame);
-                    }
-                }
+                    missile.currentPoint.add(distanceVector);
+                    // ist die länge des nächsten schritts kleiner als der abstand von currentpoint zu targetpoint
+                    //if(missile.currentPoint.x === missile.targetPoint.x)
+                });
+            },
+            drawPlayerMissiles() {
+                const firedMissiles = this.playerMissiles.filter(missile => missile.startingPoint && missile.targetPoint && missile.direction && !missile.readyToExplode);
+                firedMissiles.forEach(missile => {
+                    this.drawLine(missile.startingPoint.x, missile.startingPoint.y, missile.currentPoint.x, missile.currentPoint.y)
+                });
             },
             drawRectangle(x, y, w, h, color = "white") {
                 this.drawingContext2D.fillStyle = color;
                 this.drawingContext2D.beginPath();
                 this.drawingContext2D.fillRect(x, y, w, h);
+                this.drawingContext2D.lineWidth = 15;
                 this.drawingContext2D.stroke();
             },
-            drawBall() {
-                this.drawRectangle(this.ball.ballPosition.x, this.ball.ballPosition.y, this.ball.ballSize, this.ball.ballSize);
+            drawLine(startingX, startingY, endingX, endingY, color = "white") {
+                this.drawingContext2D.beginPath();
+                this.drawingContext2D.moveTo(startingX, startingY);
+                this.drawingContext2D.lineTo(endingX, endingY);
+                this.drawingContext2D.strokeStyle = color;
+                this.drawingContext2D.lineWidth = 1;
+                this.drawingContext2D.stroke();
             },
-            drawPaddlePlayer1() {
-                this.drawRectangle(this.player1.paddle.position.x, this.player1.paddle.position.y, this.paddleDimension.width, this.paddleDimension.height);
+            drawCircle(center, radius, color = "white") {
+                this.drawingContext2D.beginPath();
+                this.drawingContext2D.arc(center.x, center.y, radius, 0, 2 * Math.PI, false);
+                this.drawingContext2D.fillStyle = color;
+                this.drawingContext2D.fill();
+                this.drawingContext2D.lineWidth = 1;
+                this.drawingContext2D.strokeStyle = color;
+                this.drawingContext2D.stroke();
             },
-            drawPaddlePlayer2() {
-                this.drawRectangle(this.player2.paddle.position.x, this.player2.paddle.position.y, this.paddleDimension.width, this.paddleDimension.height);
+            calculateExplosionRadiuses() {
+                const maxExplosionRadiusPixel = EXPLOSION_RADIUS_MAX * this.missileCommandCanvas.width;
+                this.playerMissiles
+                    .filter(m => m.readyToExplode)
+                    .forEach(explodingMissile => {
+                            if (maxExplosionRadiusPixel >= explodingMissile.explosionRadius) {
+                                explodingMissile.explosionRadius += 1;
+                                return;
+                            }
+                            this.playerMissiles = this.playerMissiles.filter(missile => missile !== explodingMissile);
+                        }
+                    );
+            },
+            drawExplosions() {
+                this.playerMissiles
+                    .filter(missile => missile.readyToExplode)
+                    .forEach(missile => this.drawCircle(missile.targetPoint, missile.explosionRadius))
+
+            },
+            drawTargetCrosses() {
+                this.playerMissiles.filter(missile => !missile.readyToExplode).forEach(missile => this.drawTargetCross(missile.targetCross));
+
+            },
+            generateRandomMissiles() {
+                this.drawLine(this.missileCommandCanvas.width * Math.random(), 0, this.missileCommandCanvas.width * Math.random(), this.missileCommandCanvas.height)
+            },
+            calculateCanvasDimensions() {
+                this.missileCommandCanvas.width = window.innerWidth * 0.70;
+                this.missileCommandCanvas.height = this.missileCommandCanvas.width * (2 / 3);
+            },
+            generateTowns() {
+                const currentPosition = new Vector2D(this.missileCommandCanvas.width * (BASE_WIDTH + 3 * GAP), this.missileCommandCanvas.height * GROUND_POSITION_Y);
+                const completeGap = (this.missileCommandCanvas.width * (TOWN_WIDTH + (2 * GAP)));
+                for (let i = 1; i <= 6; i++) {
+                    if (i === 4) {
+                        currentPosition.x += this.missileCommandCanvas.width * (BASE_WIDTH + 2 * GAP);
+                    }
+                    const town = new Town(currentPosition.x, currentPosition.y, TOWN_WIDTH, TOWN_HEIGHT, this.missileCommandCanvas);
+                    this.towns.push(town);
+                    currentPosition.x += completeGap;
+                }
+            },
+            generateBase() {
+                const completeGap = (this.missileCommandCanvas.width * ((2 * GAP) + BASE_WIDTH + (3 * (TOWN_WIDTH + 2 * GAP))));
+                const currentPosition = new Vector2D(this.missileCommandCanvas.width * GAP, this.missileCommandCanvas.height * GROUND_POSITION_Y);
+                const base1 = new Base(currentPosition.x, currentPosition.y, BASE_WIDTH, BASE_HEIGHT, "a", this.missileCommandCanvas);
+                currentPosition.x += completeGap;
+                const base2 = new Base(currentPosition.x, currentPosition.y, BASE_WIDTH, BASE_HEIGHT, "s", this.missileCommandCanvas);
+                currentPosition.x += completeGap;
+                const base3 = new Base(currentPosition.x, currentPosition.y, BASE_WIDTH, BASE_HEIGHT, "d", this.missileCommandCanvas);
+                this.bases = [base1, base2, base3];
+            },
+            drawTown(town) {
+                this.drawRectangle(town.x, town.y, this.missileCommandCanvas.width * town.width, this.missileCommandCanvas.height * town.height, "white")
+            },
+            drawBase(base) {
+                this.drawRectangle(base.x, base.y, this.missileCommandCanvas.width * base.width, this.missileCommandCanvas.height * base.height, "white")
             },
             clearCanvas() {
-                this.drawingContext2D.clearRect(0, 0, this.pongCanvas.width, this.pongCanvas.height);
+                this.drawingContext2D.clearRect(0, 0, this.missileCommandCanvas.width, this.missileCommandCanvas.height);
             },
-            normalizeVector(vector2D) {
-                const length = Math.sqrt(Math.pow(vector2D.x, 2) + Math.pow(vector2D.y, 2));
-                vector2D.x = vector2D.x / length;
-                vector2D.y = vector2D.y / length;
-                return vector2D;
+            drawTowns() {
+                this.towns.forEach(town => this.drawTown(town));
             },
-            randomDirectionVector() {
-                return {
-                    x: 1,
-                    y: Math.random() * 0.75
-                };
-            },
-            randomizedKeySignature(vector2D) {
-                if (Math.random() > 0.5) {
-                    vector2D.x *= -1;
-                }
-                if (Math.random() > 0.5) {
-                    vector2D.y *= -1;
-                }
-
-            },
-            calculateInitialBallDirection() {
-                const vector2D = this.randomDirectionVector();
-                this.normalizeVector(vector2D);
-                this.randomizedKeySignature(vector2D);
-                return vector2D;
-            },
-            calculateBallDirectionAfterCollision(paddle, reflectDirection = 1) {
-                const p1Center = paddle.centerPoint();
-                const ballCenter = this.ball.centerPoint();
-                const diffToPaddleCenter = p1Center.y - ballCenter.y; //Wenn Ergebnis Positiv ist der Ball in der Oberen Paddlearea. Wenn negativ dann unterhalb.
-                const diffPercentage = Math.min(0.75, Math.abs(diffToPaddleCenter) / (paddle.height / 2 + this.ball.ballSize / 2));
-                const yDirection = diffToPaddleCenter < 0 ? diffPercentage : diffPercentage * -1;
-                const xDirection = reflectDirection * Math.sqrt(1 - Math.pow(yDirection, 2));
-                this.ball.ballDirection = new Vector2D(xDirection, yDirection);
-                this.ball.speed = this.selectedDifficulty.ballSpeed;
-            },
-            selectDifficulty(menuItem){
-                this.selectedDifficulty = menuItem;
-                this.gameIsRunning = true;
+            drawBases() {
+                this.bases.forEach(base => this.drawBase(base));
             },
             gameLoop() {
-                if (this.gameIsRunning) {
-                    this.clearCanvas();
+                this.clearCanvas();
 
-                    this.calculatePaddleMovement();
-                    this.calculateBallMovement();
-                    this.hasPlayerScored();
-                    this.hasPlayerWon();
+                this.calculatePlayerMissilesMovement();
+                this.calculateExplosionRadiuses();
 
-                    // draw game components
-                    this.drawBall();
-                    this.drawPaddlePlayer1();
-                    this.drawPaddlePlayer2();
-                }
+                //collisions calculation
 
-                setTimeout(this.gameLoop.bind(this), 1000 / 60)
-            }
+                this.drawTowns();
+                this.drawBases();
+                this.drawExplosions();
+                this.drawTargetCrosses();
+                this.drawPlayerMissiles();
+
+                //this.generateRandomMissiles();
+                setTimeout(this.gameLoop.bind(this), MS_PER_FRAME);
+            },
         },
         data() {
             return {
-                menuItems: [new MenuItem("easy",1, SLOW_BALL_SPEED),new MenuItem("medium",2, MEDIUM_BALL_SPEED),new MenuItem("hard",3, FAST_BALL_SPEED)],
-                selectedDifficulty: null,
-                valorantLineupStore: null,
-                running: false,
-                pongCanvas: null,
+                missileCommandCanvas: null,
                 drawingContext2D: null,
-                paddleDimension: {
-                    width: 25,
-                    height: 100
-                },
-                player1: {
-                    paddle: null,
-                    score: 0,
-                },
-                player2: {
-                    paddle: null,
-                    score: 0,
-                },
-                ball: null,
-                ballDirection: {
-                    x: 0,
-                    y: 0,
-                },
-                gameIsRunning: false,
-                pushedKeys: [],
-                gameScore: {
-                  ScoreP1: 0,
-                  ScoreP2: 0
-                }
+                pxValue: 50,
+                towns: [],
+                bases: [],
+                playerMissiles: [],
+                // playerMissilesGraveyard: [],
+                missileCounter: 0,
+                enemyRockets: [],
+                generatedEnemyMissiles: [],
             }
         },
-        computed: {
-            ballSize: function () {
-                return this.paddleDimension.width;
-            }
-        }
+        computed: {}
     }
 </script>
 
@@ -412,14 +433,15 @@
 
     .wrapper {
         position: fixed;
-        width:100%;
-        height:100vh;
+        width: 100%;
+        height: 100vh;
 
         display: flex;
         align-items: center;
         justify-content: center;
     }
-    .pong-container {
+
+    .missileCommand-container {
         display: flex;
         align-items: center;
         justify-content: center;
@@ -427,36 +449,7 @@
         background-color: grey;
     }
 
-    .pong-canvas {
+    .missileCommand-canvas {
         background-color: black;
-    }
-
-    .score {
-      position: absolute;
-      top:30%;
-      color: white;
-      display:flex;
-      justify-content: space-evenly;
-      align-items: center;
-      width: 200px;
-    }
-
-    .menu {
-        position: absolute;
-        color: white;
-        display:flex;
-        flex-direction: column;
-        gap: 5px;
-        text-align: center;
-
-    }
-
-    .menu span{
-        padding: 5px;
-    }
-
-    .menu span:hover {
-        background-color: white;
-        color: black;
     }
 </style>
